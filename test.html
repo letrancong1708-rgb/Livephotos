@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Photo Cloud Transfer</title>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
+
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; text-align: center; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        h2 { color: #1a73e8; }
+        .upload-zone { border: 2px dashed #1a73e8; padding: 20px; border-radius: 8px; margin: 20px 0; background-color: #f8f9fa; }
+        input[type="file"] { display: block; margin: 15px auto; }
+        button { background-color: #1a73e8; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        button:hover { background-color: #1557b0; }
+        #status { color: #5f6368; margin-top: 10px; font-style: italic; }
+        .photo-list { margin-top: 40px; text-align: left; }
+        .photo-item { background: #f8f9fa; border: 1px solid #e0e0e0; padding: 15px; margin-bottom: 10px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; }
+        .photo-info { font-weight: bold; color: #3c4043; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Chuyển Live Photo (iPhone ➔ Samsung)</h2>
+    <p>Chọn cùng lúc cả file ảnh (.HEIC/.JPG) và file video (.MOV) của tấm Live Photo đó.</p>
+
+    <div class="upload-zone">
+        <input type="file" id="fileInput" multiple accept="image/*,video/*">
+        <button onclick="uploadLivePhoto()">Tải Lên Firebase (Miễn phí)</button>
+        <div id="status">Sẵn sàng.</div>
+    </div>
+
+    <div class="photo-list">
+        <h3>Danh sách ảnh động đã chia sẻ:</h3>
+        <div id="listContainer">Đang tải danh sách...</div>
+    </div>
+</div>
+
+<script>
+    // 1. THAY THẾ CẤU HÌNH FIREBASE CỦA BẠN VÀO ĐÂY
+    const firebaseConfig = {
+  apiKey: "AIzaSyB0-Ok29AmstRHlR07qaLD3BCEOHTZXMzQ",
+  authDomain: "livephotos-5798d.firebaseapp.com",
+  projectId: "livephotos-5798d",
+  storageBucket: "livephotos-5798d.firebasestorage.app",
+  messagingSenderId: "127237760479",
+  appId: "1:127237760479:web:eab735c09eb2d2f5f1d06a",
+  measurementId: "G-NB7JWFXSL8"
+};
+
+    // Khởi tạo Firebase
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+    const storage = firebase.storage();
+
+    // 2. XỬ LÝ UPLOAD (Phía iPhone)
+    async function uploadLivePhoto() {
+        const fileInput = document.getElementById('fileInput');
+        const files = fileInput.files;
+        const statusDiv = document.getElementById('status');
+
+        if (files.length === 0) {
+            alert("Vui lòng chọn file trước!");
+            return;
+        }
+
+        statusDiv.innerText = "Đang xử lý và phân loại file...";
+        
+        let imgFile = null;
+        let movFile = null;
+
+        // Quét các file được chọn để tìm cặp ảnh và video ngắn (.mov)
+        for (let file of files) {
+            const ext = file.name.split('.').pop().toLowerCase();
+            if (['heic', 'jpg', 'jpeg', 'png'].includes(ext)) {
+                imgFile = file;
+            } else if (['mov', 'mp4'].includes(ext)) {
+                movFile = file;
+            }
+        }
+
+        if (!imgFile || !movFile) {
+            alert("Lỗi: Bạn cần chọn chính xác 1 file ảnh và 1 file video đi kèm của Live Photo đó!");
+            statusDiv.innerText = "Tải lên thất bại.";
+            return;
+        }
+
+        // Tạo một mã định danh chung (ID) cho cặp file này để tránh trùng lặp
+        const pairId = 'live_' + Date.now();
+        // Lấy đuôi mở rộng gốc
+        const imgExt = imgFile.name.split('.').pop();
+        const movExt = movFile.name.split('.').pop();
+
+        try {
+            // Upload file ảnh lên Storage
+            statusDiv.innerText = "Đang tải file ảnh lên...";
+            const imgRef = storage.ref(`live_photos/${pairId}.${imgExt}`);
+            await imgRef.put(imgFile);
+            const imgUrl = await imgRef.getDownloadURL();
+
+            // Upload file video lên Storage
+            statusDiv.innerText = "Đang tải phần video chuyển động...";
+            const movRef = storage.ref(`live_photos/${pairId}.${movExt}`);
+            await movRef.put(movFile);
+            const movUrl = await movRef.getDownloadURL();
+
+            // Lưu thông tin vào Realtime Database để hiển thị lên web
+            statusDiv.innerText = "Đang đồng bộ dữ liệu...";
+            await database.ref('photos/' + pairId).set({
+                id: pairId,
+                name: imgFile.name.split('.')[0], // Giữ tên gốc làm tiêu đề hiển thị
+                imgUrl: imgUrl,
+                movUrl: movUrl,
+                imgExt: imgExt,
+                movExt: movExt
+            });
+
+            statusDiv.innerText = "Tải lên thành công hoàn toàn!";
+            fileInput.value = ""; // Reset input
+        } catch (error) {
+            console.error(error);
+            statusDiv.innerText = "Có lỗi xảy ra trong quá trình upload.";
+        }
+    }
+
+    // 3. HIỂN THỊ DANH SÁCH VÀ XỬ LÝ DOWNLOAD (Phía Samsung)
+    database.ref('photos').on('value', (snapshot) => {
+        const listContainer = document.getElementById('listContainer');
+        listContainer.innerHTML = "";
+        const data = snapshot.val();
+
+        if (!data) {
+            listContainer.innerHTML = "<p>Chưa có ảnh nào được tải lên.</p>";
+            return;
+        }
+
+        // Duyệt qua cơ sở dữ liệu để vẽ giao diện các nút bấm
+        Object.keys(data).forEach((key) => {
+            const item = data[key];
+            const itemHtml = `
+                <div class="photo-item">
+                    <div class="photo-info">🎬 ${item.name}</div>
+                    <button onclick="downloadToSamsung('${item.imgUrl}', '${item.movUrl}', '${item.name}', '${item.imgExt}', '${item.movExt}')">
+                        Tải về Samsung
+                    </button>
+                </div>
+            `;
+            listContainer.innerHTML += itemHtml;
+        });
+    });
+
+    // Hàm tải đồng thời cả 2 file về bộ nhớ máy
+    function downloadToSamsung(imgUrl, movUrl, baseName, imgExt, movExt) {
+        const triggerDownload = (url, filename) => {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.target = '_blank'; // Đảm bảo không bị lỗi điều hướng trình duyệt
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        };
+
+        // Quan trọng: Đặt tên file ảnh và video trùng nhau hoàn toàn (chỉ khác đuôi)
+        // Khi lưu vào chung thư mục trên Samsung, One UI sẽ tự động nhận diện thành Motion Photo
+        triggerDownload(imgUrl, `${baseName}.${imgExt}`);
+        
+        // Trì hoãn 600ms để trình duyệt của điện thoại không chặn tải nhiều file cùng lúc
+        setTimeout(() => {
+            triggerDownload(movUrl, `${baseName}.${movExt}`);
+        }, 600);
+    }
+</script>
+
+</body>
+</html>
